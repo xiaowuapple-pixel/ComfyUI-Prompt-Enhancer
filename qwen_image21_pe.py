@@ -68,9 +68,29 @@ TASK_AUTO = "Auto (by images)"
 # two force it, which the query-time hint alone cannot do -- the language rule
 # lives in the system prompt, so that is what gets rewritten.
 LANGUAGE_AUTO = "Auto (official)"
-LANGUAGE_CHINESE = "Chinese"
-LANGUAGE_ENGLISH = "English"
+LANGUAGE_CHINESE = "Chinese (zh)"
+LANGUAGE_ENGLISH = "English (en)"
 LANGUAGE_OPTIONS = [LANGUAGE_AUTO, LANGUAGE_CHINESE, LANGUAGE_ENGLISH]
+
+
+def _language_kind(value):
+    """Which language a setting means, whatever its label happens to look like.
+
+    A translation pack rewrites combo labels by exact lookup, and "Chinese" is a
+    key in the zh-CN dictionary shipped with AIGODLIKE-ComfyUI-Translation (it
+    comes from another node pack), so the option showed up as "中国人". The labels
+    here are therefore not plain dictionary words -- and the setting is matched by
+    what it says rather than by equality, so a translated label, an older saved
+    workflow, or a future rename all keep working.
+    """
+    text = str(value or "").strip().casefold()
+    if not text or "auto" in text or "官方" in text or "自动" in text:
+        return LANGUAGE_AUTO
+    if "english" in text or "英文" in text or "英语" in text or "(en" in text:
+        return LANGUAGE_ENGLISH
+    if "chinese" in text or "中文" in text or "中国" in text or "(zh" in text:
+        return LANGUAGE_CHINESE
+    return LANGUAGE_AUTO
 
 # The exact rule lines in the two checkpoints' system prompts.
 _T2I_LANGUAGE_RULES = (
@@ -286,7 +306,8 @@ def _apply_output_language(system_prompt, task, language):
     place -- the image-text rule (the text painted *into* the picture) is left
     exactly as it was, because that one follows different priorities on purpose.
     """
-    if language == LANGUAGE_AUTO or not language:
+    language = _language_kind(language)
+    if language == LANGUAGE_AUTO:
         return system_prompt
     target = "Simplified Chinese" if language == LANGUAGE_CHINESE else "English"
     if task == "t2i":
@@ -1581,7 +1602,7 @@ class QwenImage21PromptEnhancer:
         override = int(settings.get("max_new_tokens", 0) or 0)
         requested = override or profile["max_new_tokens"]
         system_prompt = _load_system_prompt(task, model.get("system_prompt_file", ""))
-        output_language = inputs.get("Output Language", LANGUAGE_AUTO) or LANGUAGE_AUTO
+        output_language = _language_kind(inputs.get("Output Language", LANGUAGE_AUTO))
         system_prompt = _apply_output_language(system_prompt, task, output_language)
         megapixels = float(inputs.get("Target Megapixels", 2.0) or 2.0)
         forced_ratio = inputs.get("Aspect Ratio", ASPECT_AUTO)
@@ -1602,6 +1623,7 @@ class QwenImage21PromptEnhancer:
             # language -- the request is relabelled so it reads as content, not as
             # a style cue. The quoted image text keeps its own rule.
             target = "Chinese" if output_language == LANGUAGE_CHINESE else "English"
+            print(f"[Qwen Image 2.1 PE] 输出语言强制为 {target}（已改写系统提示词语言段 + 用户回合指令 + 末尾语言锁）")
             model_prompt = (
                 "OUTPUT LANGUAGE DIRECTIVE (highest priority for this user turn): "
                 f"write every descriptive word of rewritten_prompt in {target}, and describe "
