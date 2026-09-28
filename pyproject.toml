@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-prompt-enhancer-suite"
-version = "1.0.6"
+version = "1.0.7"
 description = "Prompt enhancer nodes for ComfyUI: Qwen Image 2.1 prompt expansion (PE-T2I / PE-I2I), MiniMax H3 video prompts, and general image prompts."
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
@@ -14,7 +14,11 @@ classifiers = [
 Repository = "https://github.com/xiaowuapple-pixel/ComfyUI-Prompt-Enhancer"
 
 [project.optional-dependencies]
-local-gguf = ["llama-cpp-python>=0.3.46"]
+# PyPI 上的 llama-cpp-python 最新只到 0.3.35，也没有 Windows 轮子，所以 0.3.46
+# 不能写在这里当版本下限（pip 会找不到发行版）。本地 GGUF 的 CUDA 轮子请按
+# README 用 requirements-local-gguf*.txt 安装；这里的下限只给 CPU / macOS
+# 本地编译兜底。
+local-gguf = ["llama-cpp-python>=0.3.35"]
 rtx = ["nvidia-vfx"]
 
 [tool.comfy]

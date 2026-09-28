@@ -90,17 +90,32 @@ GGUF 走 llama.cpp，实测比 int8 safetensors 快约 5 倍，16GB 显存建议
 将仓库目录放入 `ComfyUI/custom_nodes/` 后重启 ComfyUI。依赖文件说明：
 
 - `requirements.txt`：基础依赖，在线 API 模式必须安装
-- `requirements-local-gguf.txt`：可选依赖，只有使用本地 GGUF 时安装
+- `requirements-local-gguf.txt` / `-cu131` / `-cu128`：可选依赖，只有使用本地 GGUF 时安装，
+  按你的 CUDA 版本选一个（见下）
 
 在 ComfyUI 使用的 Python 环境中执行：
 
 ```bash
 pip install -r requirements.txt
-# 本地 GGUF 模式额外安装（选择与你的 CUDA/GPU 匹配的构建）
-pip install -r requirements-local-gguf.txt
 ```
 
 在线 API 模式无需安装 `llama-cpp-python`。
+
+本地 GGUF 模式要额外装一个带 CUDA 的 `llama-cpp-python`。注意 **不要**写
+`pip install llama-cpp-python>=0.3.46`：PyPI 上最新只到 `0.3.35`，而且完全没有 Windows 轮子，
+pip 只会报 `No matching distribution`。0.3.46 目前只有预编译 CUDA 轮子（来自
+[JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python/releases)），本仓库的三个文件就是按
+平台 + Python 版本自动挑轮子：
+
+```bash
+python -c "import sys, torch; print(sys.version.split()[0], torch.version.cuda)"   # 先看自己的版本
+pip install -r requirements-local-gguf.txt          # Windows + CUDA 13.0
+pip install -r requirements-local-gguf-cu131.txt    # CUDA 13.1（Windows / Linux）
+pip install -r requirements-local-gguf-cu128.txt    # CUDA 12.8（Windows / Linux）
+```
+
+CPU 或 macOS：`pip install llama-cpp-python==0.3.35`（需要本地编译工具链），macOS 也可以直接用上面 releases 里的
+Metal 轮子。轮子是 300MB 级的，装完重启 ComfyUI 即可。
 在节点中选择模型、生成类型和创意技能；无图且选择“自动判别”时会自动采用文生视频方式。
 GPU 卸载层数默认为 `-1`，表示全部放入显存；显存不足时可改为 16-24。
 
@@ -475,9 +490,23 @@ git clone https://github.com/xiaowuapple-pixel/ComfyUI-Prompt-Enhancer.git
 ```
 
 Or install it from ComfyUI-Manager with `Install via Git URL` and the same address, then restart
-ComfyUI. Install the base dependencies from `requirements.txt`. For local GGUF inference, additionally
-install the optional dependencies from `requirements-local-gguf.txt` using a build compatible with
-your CUDA/GPU. Online API mode does not require `llama-cpp-python`.
+ComfyUI. Install the base dependencies from `requirements.txt`. Online API mode does not require
+`llama-cpp-python`.
+
+For local GGUF inference, do **not** run `pip install llama-cpp-python>=0.3.46`: PyPI's newest release
+is `0.3.35` and it ships no Windows wheels at all, so pip can only answer `No matching distribution`.
+The 0.3.46 builds live on the [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python/releases)
+releases page as prebuilt CUDA wheels, and these files pick one from your platform and Python version:
+
+```bash
+python -c "import sys, torch; print(sys.version.split()[0], torch.version.cuda)"   # check yours first
+pip install -r requirements-local-gguf.txt          # Windows + CUDA 13.0
+pip install -r requirements-local-gguf-cu131.txt    # CUDA 13.1 (Windows / Linux)
+pip install -r requirements-local-gguf-cu128.txt    # CUDA 12.8 (Windows / Linux)
+```
+
+CPU or macOS: `pip install llama-cpp-python==0.3.35` (needs a local toolchain), or take a Metal wheel
+from the same releases page. The wheels are ~300 MB; restart ComfyUI afterwards.
 With no image connected and generation type set to Auto, the node automatically uses text-to-video.
 
 ### Models

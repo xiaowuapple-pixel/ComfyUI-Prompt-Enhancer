@@ -1,3 +1,23 @@
-# Optional: install this only when using local GGUF models.
-# Choose a llama-cpp-python wheel/build matching your CUDA and GPU setup.
-llama-cpp-python>=0.3.46
+# 本地 GGUF 推理用的 llama-cpp-python（可选；在线 API 模式不需要）。
+#
+# 别写 `llama-cpp-python>=0.3.46`：PyPI 上最新只到 0.3.35，而且完全没有 Windows
+# 轮子，pip 会直接报 "No matching distribution"（issue #1）。0.3.46 只以预编译
+# CUDA 轮子形式存在，来自 JamePeng 的构建：
+#   https://github.com/JamePeng/llama-cpp-python/releases
+#
+# 本文件 = Windows + CUDA 13.0（秋叶整合包 v3 常见），按 Python 版本自动选轮子。
+# 其它组合用同目录另外两个文件：
+#   requirements-local-gguf-cu131.txt   CUDA 13.1（Windows / Linux）
+#   requirements-local-gguf-cu128.txt   CUDA 12.8（Windows / Linux）
+# 先确认自己的版本：python -c "import sys, torch; print(sys.version.split()[0], torch.version.cuda)"
+# CPU 或 macOS：pip install llama-cpp-python==0.3.35（需要本地编译工具链），
+# macOS 也可以从上面 releases 里挑 Metal 轮子。
+
+llama-cpp-python @ https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.46-cu130-win-20260808/llama_cpp_python-0.3.46+cu130-cp310-cp310-win_amd64.whl ; python_version == "3.10" and platform_system == "Windows"
+llama-cpp-python @ https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.46-cu130-win-20260808/llama_cpp_python-0.3.46+cu130-cp311-cp311-win_amd64.whl ; python_version == "3.11" and platform_system == "Windows"
+llama-cpp-python @ https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.46-cu130-win-20260808/llama_cpp_python-0.3.46+cu130-cp312-cp312-win_amd64.whl ; python_version == "3.12" and platform_system == "Windows"
+llama-cpp-python @ https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.46-cu130-win-20260808/llama_cpp_python-0.3.46+cu130-cp313-cp313-win_amd64.whl ; python_version == "3.13" and platform_system == "Windows"
+llama-cpp-python @ https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.46-cu130-win-20260808/llama_cpp_python-0.3.46+cu130-cp314-cp314-win_amd64.whl ; python_version == "3.14" and platform_system == "Windows"
+
+# Linux 上 CUDA 13.0 没有对应轮子，请用 cu131 或 cu128 的文件。
+llama-cpp-python>=0.3.35 ; platform_system != "Windows"

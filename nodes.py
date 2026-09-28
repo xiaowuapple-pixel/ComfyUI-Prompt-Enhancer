@@ -19,18 +19,34 @@ import comfy.model_management as mm
 import folder_paths
 try:
     from llama_cpp import Llama
-    from llama_cpp.llama_chat_format import (
-        Gemma3ChatHandler,
-        Gemma4ChatHandler,
-        MTMDChatHandler,
-        Qwen35ChatHandler,
-        Qwen3VLChatHandler,
-    )
     _LLAMA_CPP_IMPORT_ERROR = None
 except ImportError as exc:
     # Online API mode and node registration do not require llama-cpp-python.
     Llama = None
     _LLAMA_CPP_IMPORT_ERROR = exc
+
+
+def _chat_handler_class(name):
+    """Look up one chat handler, tolerating builds that do not ship it yet.
+
+    The handlers do not appear at the same time: PyPI's newest llama-cpp-python
+    (0.3.35, no Windows wheels at all) is older than the prebuilt CUDA wheels
+    people actually run. Importing the five as a group meant one missing handler
+    disabled local GGUF for every model, so they are resolved one by one and the
+    caller says which setup a given model needs.
+    """
+    try:
+        import llama_cpp.llama_chat_format as llama_chat_format
+    except ImportError:
+        return None
+    return getattr(llama_chat_format, name, None)
+
+
+Gemma3ChatHandler = _chat_handler_class("Gemma3ChatHandler")
+Gemma4ChatHandler = _chat_handler_class("Gemma4ChatHandler")
+MTMDChatHandler = _chat_handler_class("MTMDChatHandler")
+Qwen35ChatHandler = _chat_handler_class("Qwen35ChatHandler")
+Qwen3VLChatHandler = _chat_handler_class("Qwen3VLChatHandler")
 
 
 SECTION_NAMES = (
@@ -479,12 +495,26 @@ def _gguf_architecture(model_path):
     return ""
 
 
+_LLAMA_INSTALL_HINT = (
+    "本地 GGUF 模式需要带 CUDA 的 llama-cpp-python：PyPI 上最新只有 0.3.35，"
+    "也没有 Windows 轮子，按版本号装必然失败；请按 README「本地 GGUF」一节，"
+    "用 requirements-local-gguf*.txt 安装预编译轮子；"
+    "在线 OpenAI 兼容 API 模式不需要这个依赖。"
+)
+
+
+def _require_handler(handler, name, model_name):
+    if handler is None:
+        raise RuntimeError(
+            f"这个 llama-cpp-python 里没有 {name}，读不了 {model_name}，"
+            "换个更新的预编译轮子即可（README「本地 GGUF」）。"
+        )
+    return handler
+
+
 def _create_chat_handler(model_name, mmproj_path, enable_thinking=False):
     if _LLAMA_CPP_IMPORT_ERROR is not None:
-        raise RuntimeError(
-            "本地 GGUF 模式需要安装 llama-cpp-python>=0.3.46；"
-            "在线 OpenAI 兼容 API 模式无需此依赖。"
-        ) from _LLAMA_CPP_IMPORT_ERROR
+        raise RuntimeError(_LLAMA_INSTALL_HINT) from _LLAMA_CPP_IMPORT_ERROR
     name = Path(model_name).name.lower()
     family = _gguf_architecture(_resolve_llm_path(model_name)) or name
     common = {
@@ -496,14 +526,20 @@ def _create_chat_handler(model_name, mmproj_path, enable_thinking=False):
     if "qwen35" in family or "qwen3_5" in family or any(
         version in name for version in ("qwen3.5", "qwen3.6", "qwen3.7", "qwen3.8", "qwen3.9")
     ):
-        return Qwen35ChatHandler(enable_thinking=enable_thinking, **common)
+        return _require_handler(Qwen35ChatHandler, "Qwen35ChatHandler", model_name)(
+            enable_thinking=enable_thinking, **common
+        )
     if "qwen3vl" in family or "qwen3-vl" in name or "qwen3_vl" in name:
-        return Qwen3VLChatHandler(force_reasoning=enable_thinking, **common)
+        return _require_handler(Qwen3VLChatHandler, "Qwen3VLChatHandler", model_name)(
+            force_reasoning=enable_thinking, **common
+        )
     if "gemma-4" in name or "gemma4" in name:
-        return Gemma4ChatHandler(enable_thinking=enable_thinking, **common)
+        return _require_handler(Gemma4ChatHandler, "Gemma4ChatHandler", model_name)(
+            enable_thinking=enable_thinking, **common
+        )
     if "gemma-3" in name or "gemma3" in name:
-        return Gemma3ChatHandler(**common)
-    return MTMDChatHandler(use_gpu=True, **common)
+        return _require_handler(Gemma3ChatHandler, "Gemma3ChatHandler", model_name)(**common)
+    return _require_handler(MTMDChatHandler, "MTMDChatHandler", model_name)(use_gpu=True, **common)
 
 
 # Context window sizes offered by the nodes. A larger window needs more VRAM for
@@ -534,10 +570,7 @@ class _VisionRuntime:
         enable_thinking=False,
     ):
         if _LLAMA_CPP_IMPORT_ERROR is not None:
-            raise RuntimeError(
-                "本地 GGUF 模式需要安装 llama-cpp-python>=0.3.46；"
-                "在线 OpenAI 兼容 API 模式无需此依赖。"
-            ) from _LLAMA_CPP_IMPORT_ERROR
+            raise RuntimeError(_LLAMA_INSTALL_HINT) from _LLAMA_CPP_IMPORT_ERROR
         cls.close()
         mm.unload_all_models()
         model_path = _resolve_llm_path(model_relative_path)
