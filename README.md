@@ -175,6 +175,22 @@ Qwen Image 2.1` 只吃单个字符串，把增强节点的 `Positive Prompt`（�
 > 需要稳定透明，走二次编辑——先出图，再用同一个模型跑一次"去掉白底"的编辑（这条路对很细的文字边缘
 > 也很有效）；或者后期用抠图模型处理。
 
+### 输出语言（Output Language）
+
+官方契约是死的：**t2i 恒英文、edit 跟随你输入的语言**。想反过来（t2i 写中文、或用英文做编辑比对）
+就选 `Output Language`：
+
+| 选项 | 行为 |
+| --- | --- |
+| `Auto (official)` | 官方规则，不干预 |
+| `Chinese` / `English` | 强制描述性文字用该语言 |
+
+实测（同一张图、同一句请求）：t2i 从 100% 英文变成 **100% 中文**；编辑从 96% 中文变成 **100% 英文**。
+
+实现上是**三重叠加**，缺一不可：系统提示词里的语言规则段整段改写 → 用户回合开头加"语言指令"并把请求
+重新标注为"按意思理解、别照抄语言" → 末尾再补一道语言锁。只改系统提示词是没用的（语言是训进权重的），
+只加一句软指令也没用。**画进图里的文字不受影响**（引号内文字仍按官方那套优先级决定）。
+
 两个加载节点输出同一种 `PE Model`，**用哪个就接哪个**——这样每个模式只显示它需要的选择，
 不会出现"选了 A 还要面对 B 的空白控件"：
 
@@ -376,6 +392,25 @@ never the diffusion model, the VAE or anything else loaded. Measured: 7.6 GB -> 
 > The node therefore does **no transparency rewriting**: whatever the model writes is what you get.
 > For dependable alpha, generate first and run a second edit pass with the same model to drop the white
 > background -- that works well even for very fine text edges -- or cut the subject out with a matte model.
+
+### Output Language
+
+The official contract is fixed: **t2i always answers in English, edit mirrors the language you typed in**.
+`Output Language` is for when you want the other one -- Chinese from t2i, or English for an edit.
+
+| Choice | Behaviour |
+| --- | --- |
+| `Auto (official)` | The contract as-is, nothing touched |
+| `Chinese` / `English` | Force the descriptive prose into that language |
+
+Measured on one request and one image: t2i went from 100% English to **100% Chinese**, edit from 96% Chinese
+to **100% English**.
+
+It takes all three of these, not any one of them: rewriting the language rule inside the system prompt, a
+directive at the top of the user turn that also relabels the request as "follow the meaning, not the
+language", and a language lock at the end. The rule alone does nothing -- the language is baked into the
+weights -- and a single soft sentence does nothing either. Text painted *into* the image is unaffected; it
+still follows the official priority order.
 
 Both loaders output the same `PE Model` type, so you wire whichever one matches your case -- and each shows
 only the pickers it needs:

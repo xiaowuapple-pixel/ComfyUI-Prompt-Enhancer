@@ -63,6 +63,33 @@ SOURCE_AUTO = "Local safetensors (auto)"
 
 TASK_AUTO = "Auto (by images)"
 
+# Which language the rewritten prompt's descriptive prose should be in. Auto is
+# the official contract (t2i always English, edit mirrors the request); the other
+# two force it, which the query-time hint alone cannot do -- the language rule
+# lives in the system prompt, so that is what gets rewritten.
+LANGUAGE_AUTO = "Auto (official)"
+LANGUAGE_CHINESE = "Chinese"
+LANGUAGE_ENGLISH = "English"
+LANGUAGE_OPTIONS = [LANGUAGE_AUTO, LANGUAGE_CHINESE, LANGUAGE_ENGLISH]
+
+# The exact rule lines in the two checkpoints' system prompts.
+_T2I_LANGUAGE_RULES = (
+    "The description is always in English, whatever language the request arrives in. "
+    "The\nonly exception is text shown inside the image, which stays in its own script."
+)
+_EDIT_LANGUAGE_RULES = (
+    "- User instruction is in Chinese → write the description in Chinese.\n"
+    "- User instruction is in English → write the description in English.\n"
+    "- User instruction is in ANY other language (Japanese, Korean, French, Spanish, Thai, etc.) "
+    "→ write the description in English."
+)
+
+_EDIT_LANGUAGE_HEADING = (
+    "**(A) Language of the rewritten prompt's DESCRIPTIVE prose — every word OUTSIDE double quotes "
+    "(the description you write for the diffusion model, NOT the text painted into the image). "
+    "This decision is final and non-negotiable:**"
+)
+
 # The official contract lets the model choose the canvas; this lets you override
 # it. Forcing a ratio changes two things: the model is told about it (so the
 # composition it describes matches the frame) and the Width/Height outputs use it.
@@ -248,6 +275,48 @@ def _load_encoder(filename):
     )
     _ENCODER_CACHE[filename] = clip
     return clip
+
+
+def _apply_output_language(system_prompt, task, language):
+    """Force the descriptive prose into one language by editing the rule itself.
+
+    Asking for it in the user turn does not survive: the checkpoints were trained
+    with the language decision written into their system prompt, and an extra
+    sentence in the request is routinely ignored. So the rule is replaced in
+    place -- the image-text rule (the text painted *into* the picture) is left
+    exactly as it was, because that one follows different priorities on purpose.
+    """
+    if language == LANGUAGE_AUTO or not language:
+        return system_prompt
+    target = "Simplified Chinese" if language == LANGUAGE_CHINESE else "English"
+    if task == "t2i":
+        replacement = (
+            f"The description is always in {target}, whatever language the request arrives in. "
+            "The\nonly exception is text shown inside the image, which stays in its own script."
+        )
+        if _T2I_LANGUAGE_RULES in system_prompt:
+            return system_prompt.replace(_T2I_LANGUAGE_RULES, replacement)
+    else:
+        heading = (
+            "**(A) LANGUAGE IS FIXED BY THE CALLER — every word OUTSIDE double quotes is written "
+            f"in {target}. This override is final, non-negotiable, and independent of the language "
+            "the user instruction happens to be written in, which must never be mirrored:**"
+        )
+        replacement = (
+            f"- The description is always written in {target}, whatever language the "
+            "instruction arrives in."
+        )
+        if _EDIT_LANGUAGE_HEADING in system_prompt:
+            system_prompt = system_prompt.replace(_EDIT_LANGUAGE_HEADING, heading)
+        if _EDIT_LANGUAGE_RULES in system_prompt:
+            return system_prompt.replace(_EDIT_LANGUAGE_RULES, replacement)
+    # A custom system prompt file: leave the text alone and say so, rather than
+    # silently pretending the setting took effect.
+    print(
+        "[Qwen Image 2.1 PE] 注意：系统提示词里没有找到官方的语言规则段（可能你指定了自定义文件），"
+        f"本次无法强制 {target}，仍按提示词自身的规则走。"
+    )
+    return system_prompt
 
 
 def _load_system_prompt(task, override_path):
@@ -1401,6 +1470,15 @@ class QwenImage21PromptEnhancer:
                         "tooltip": "输出几条提示词。每条都是一次完整生成，耗时按条数叠加。",
                     },
                 ),
+                "Output Language": (
+                    LANGUAGE_OPTIONS,
+                    {
+                        "default": LANGUAGE_AUTO,
+                        "tooltip": "提示词描述用什么语言。Auto=官方规则（t2i 恒英文、edit 跟随输入）；"
+                                   "选 Chinese/English 会改写系统提示词里的语言段来强制，"
+                                   "画进图里的文字规则不受影响。",
+                    },
+                ),
             },
             "optional": {
                 "pe_model": (
@@ -1503,6 +1581,8 @@ class QwenImage21PromptEnhancer:
         override = int(settings.get("max_new_tokens", 0) or 0)
         requested = override or profile["max_new_tokens"]
         system_prompt = _load_system_prompt(task, model.get("system_prompt_file", ""))
+        output_language = inputs.get("Output Language", LANGUAGE_AUTO) or LANGUAGE_AUTO
+        system_prompt = _apply_output_language(system_prompt, task, output_language)
         megapixels = float(inputs.get("Target Megapixels", 2.0) or 2.0)
         forced_ratio = inputs.get("Aspect Ratio", ASPECT_AUTO)
         forced_pair = None if forced_ratio == ASPECT_AUTO else _ratio_to_pair(forced_ratio)
@@ -1514,6 +1594,27 @@ class QwenImage21PromptEnhancer:
             )
         else:
             model_prompt = prompt
+        if output_language != LANGUAGE_AUTO:
+            # The language decision is baked into the weights: replacing the rule
+            # inside the system prompt was measured to change nothing (t2i stayed
+            # English, edit stayed Chinese). What does move it is a directive in
+            # the user turn that also tells the model not to copy the request's
+            # language -- the request is relabelled so it reads as content, not as
+            # a style cue. The quoted image text keeps its own rule.
+            target = "Chinese" if output_language == LANGUAGE_CHINESE else "English"
+            model_prompt = (
+                "OUTPUT LANGUAGE DIRECTIVE (highest priority for this user turn): "
+                f"write every descriptive word of rewritten_prompt in {target}, and describe "
+                "the finished picture in that language. The language of the request below is "
+                "irrelevant and must not be copied. Text that has to appear inside the image "
+                "keeps its own original language and characters; that exception covers only "
+                "the quoted image text, never the descriptive prose.\n\n"
+                "USER REQUEST (follow its meaning, not its language):\n"
+                f"{model_prompt}"
+                "\n\nFINAL LANGUAGE LOCK (must be obeyed after reading the image): every "
+                f"descriptive word of rewritten_prompt is in {target}. The language of the "
+                "request above is irrelevant and must not be mirrored."
+            )
         source = model.get("source", SOURCE_AUTO)
         if source == SOURCE_AUTO:
             # ComfyUI grows the KV cache with the request, so there is no fixed
@@ -1547,6 +1648,7 @@ class QwenImage21PromptEnhancer:
                     "aspect": forced_ratio,
                     "thinking": thinking,
                     "plan_tokens": int(model.get("plan_tokens", -1)),
+                    "language": output_language,
                 },
             )
             cached = _cache_read(cache_key)
