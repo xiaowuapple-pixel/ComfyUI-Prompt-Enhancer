@@ -1556,7 +1556,7 @@ class Qwen36MultiImageH3ChinesePrompt:
             if section_count < 2 or _looks_like_internal_text(prompt):
                 raise RuntimeError(
                     "所选语言模型没有遵循 H3 写作指令，返回了内部说明或无关文本。"
-                    "这通常是 Uncensored 微调模型的指令遵循问题，请更换 Instruct 模型或更换种子。"
+                    "这通常是模型指令遵循能力不足导致的，请更换指令模型或更换种子重试。"
                 )
             prompt = _normalize_sections(prompt, sections)
             prompt = _strip_type_heading(prompt, generation_type)

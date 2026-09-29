@@ -6,6 +6,11 @@
 - **MiniMax H3**：为 H3 生成可直接使用的视频提示词，支持参考图、参考视频、参考音频与官方创意 skills
 - **普通图像提示词**：根据原始需求和最多两张参考图，生成 SDXL / Illustrious / NoobAI 标签式提示词，或中英文自然语言提示词
 
+![Qwen Image 2.1 提示词增强范例工作流](example_workflows/Qwen-Image-2.1-PE.jpg)
+
+上图就是 `example_workflows/Qwen-Image-2.1-PE.json`：左边一张参考图加一句简单需求，PE 加载器挑好 T2I / I2I
+权重，增强节点把需求扩写成 2.1 真正吃的长提示词，右边直接出图。
+
 ## 安装
 
 ```bash
@@ -27,7 +32,7 @@ pip install -r requirements-local-gguf.txt
 
 | 用途 | 文件 | 放哪里 | 下载 |
 | --- | --- | --- | --- |
-| H3 视频提示词 | `Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf`（或 Q6_K）+ `mmproj-Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-BF16.gguf` | `models/LLM/` | [HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive](https://huggingface.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive) |
+| H3 视频提示词 | 任意 Qwen3.5 / Qwen3.8 系视觉语言模型（`*.gguf`）+ 配套的 `mmproj-*.gguf`；节点自动扫描 `models/LLM`，不限定模型来源 | `models/LLM/` | 见下一行的备选模型，或换成你已经在用的同代模型 |
 | H3 视频提示词（备选） | `Qwen3.8-9B-Q6_K.gguf` / `Qwen3.8-9B-Q8_0.gguf` | `models/LLM/` | [empero-ai/Qwen3.8-9B-Distill-GGUF](https://huggingface.co/empero-ai/Qwen3.8-9B-Distill-GGUF) |
 | Qwen Image 2.1 扩写（推荐） | `Qwen-Image-2.1-PE-T2I.Q5_K_M.gguf` | `models/LLM/` | [prithivMLmods/Qwen-Image-2.1-PE-T2I-GGUF](https://huggingface.co/prithivMLmods/Qwen-Image-2.1-PE-T2I-GGUF) |
 | Qwen Image 2.1 扩写（带图改写） | `Qwen-Image-2.1-PE-I2I.Q5_K_M.gguf` + `Qwen-Image-2.1-PE-I2I.mmproj-bf16.gguf` | `models/LLM/` | [prithivMLmods/Qwen-Image-2.1-PE-I2I-GGUF](https://huggingface.co/prithivMLmods/Qwen-Image-2.1-PE-I2I-GGUF) |
@@ -35,6 +40,8 @@ pip install -r requirements-local-gguf.txt
 
 GGUF 走 llama.cpp，实测比 int8 safetensors 快约 5 倍，16GB 显存建议走 GGUF。
 模型也可以放在 `extra_model_paths.yaml` 注册的其它目录里，节点会一起扫描。
+视觉投影文件（mmproj）只要是同代 Qwen3.5 / Qwen3.8 的视觉投影即可，节点只要求它能被 llama.cpp 的
+Qwen 视觉 handler 加载，不要求文件名配对。
 
 ## 范例工作流
 
@@ -43,13 +50,13 @@ GGUF 走 llama.cpp，实测比 int8 safetensors 快约 5 倍，16GB 显存建议
 
 | 范例 | 内容 | 除本包外还需要 |
 | --- | --- | --- |
-| `Qwen-Image-2.1-TI2I.json` | Qwen Image 2.1 文生图 / 改图：PE 加载 + 提示词增强 + 多张参考图 | ComfyUI_LayerStyle、rgthree-comfy、ComfyUI-Crystools、ComfyUI-Easy-Use、KayTool |
-
-这些范例同时会出现在 ComfyUI 的 **`工作流 → 浏览模板`** 里（官方规定：custom node 目录下的
-`example_workflows/` 会被模板浏览器读取，同名 `.jpg` 作为缩略图）。所以装完本包不用去 GitHub 找，
-直接在模板浏览器里就能打开。
+| `Qwen-Image-2.1-PE.json` | Qwen Image 2.1 文生图 / 改图：PE-GGUF 加载 + 提示词增强 + 最多 10 张参考图 + 列表编码 + 释放文本编码器 | KayTool（Text 节点）、ComfyUI-Custom-Scripts（ShowText） |
 | `MiniMax-H3-multi-reference.json` | H3 多参考视频：音频精修、冻结缓存、RTX 超分 | ComfyUI-H3-Multishot、ComfyUI-H3-AudioRefine、comfyui-minimax-h3-audio-T8、ComfyUI-KJNodes、ComfyUI-VideoHelperSuite、ComfyUI-DLSS5-Enhancer、Nvidia_RTX_Nodes_ComfyUI、ComfyUI-SolAttn_triton、ComfyUI-Easy-Use、KayTool |
 | `MiniMax-H3-two-pass-multi-reference.json` | H3 二采多参考：Turbo 采样 + 潜空间放大 | ComfyUI-H3-Multishot、ComfyUI-MiniMax-H3-Turbo、Comfyui_Minimax_h3_latent_Upscaler、ComfyUI-KJNodes、ComfyUI-VideoHelperSuite、ComfyUI-SolAttn_triton、rgthree-comfy、ComfyUI-Easy-Use、KayTool |
+
+同名 `.jpg` 是范例的缩略图（`Qwen-Image-2.1-PE.jpg` 就是上面那张截图）。这些范例同时会出现在 ComfyUI 的
+**`工作流 → 浏览模板`** 里（官方规定：custom node 目录下的 `example_workflows/` 会被模板浏览器读取，
+同名 `.jpg` 作为缩略图）。所以装完本包不用去 GitHub 找，直接在模板浏览器里就能打开。
 
 ## 中文说明
 
@@ -548,7 +555,7 @@ With no image connected and generation type set to Auto, the node automatically 
 
 | Use | Files | Where | Download |
 | --- | --- | --- | --- |
-| H3 video prompts | `Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf` (or Q6_K) + `mmproj-Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-BF16.gguf` | `models/LLM/` | [HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive](https://huggingface.co/HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive) |
+| H3 video prompts | Any Qwen3.5 / Qwen3.8 vision-language GGUF (`*.gguf`) plus its matching `mmproj-*.gguf`; the node scans `models/LLM`, no model source is required | `models/LLM/` | See the alternative row below, or keep whatever same-generation model you already use |
 | H3 video prompts (alternative) | `Qwen3.8-9B-Q6_K.gguf` / `Qwen3.8-9B-Q8_0.gguf` | `models/LLM/` | [empero-ai/Qwen3.8-9B-Distill-GGUF](https://huggingface.co/empero-ai/Qwen3.8-9B-Distill-GGUF) |
 | Qwen Image 2.1 expansion (recommended) | `Qwen-Image-2.1-PE-T2I.Q5_K_M.gguf` | `models/LLM/` | [prithivMLmods/Qwen-Image-2.1-PE-T2I-GGUF](https://huggingface.co/prithivMLmods/Qwen-Image-2.1-PE-T2I-GGUF) |
 | Qwen Image 2.1 edit | `Qwen-Image-2.1-PE-I2I.Q5_K_M.gguf` + `Qwen-Image-2.1-PE-I2I.mmproj-bf16.gguf` | `models/LLM/` | [prithivMLmods/Qwen-Image-2.1-PE-I2I-GGUF](https://huggingface.co/prithivMLmods/Qwen-Image-2.1-PE-I2I-GGUF) |
@@ -557,6 +564,8 @@ With no image connected and generation type set to Auto, the node automatically 
 The GGUF path runs on llama.cpp and measured about 5x faster than the int8 safetensors path, so it is
 what a 16 GB card should use. Models placed in other directories registered by `extra_model_paths.yaml`
 are picked up too.
+Any same-generation Qwen3.5 / Qwen3.8 vision projection works as the `mmproj`; the node only needs
+llama.cpp's Qwen vision handler to load it, the file names do not have to match.
 
 ### Example workflow
 
@@ -566,13 +575,14 @@ the third column lists what each one needs beyond this pack:
 
 | Example | What it does | Also needs |
 | --- | --- | --- |
-| `Qwen-Image-2.1-TI2I.json` | Qwen Image 2.1 text-to-image / edit: PE loader, prompt enhancer, several reference images | ComfyUI_LayerStyle, rgthree-comfy, ComfyUI-Crystools, ComfyUI-Easy-Use, KayTool |
-
-The same files show up in ComfyUI's **`Workflows -> Browse Templates`** browser: by ComfyUI's
-convention a `example_workflows/` folder inside a custom node is read by the template browser, and a
-`.jpg` with the same name becomes its thumbnail. Install the pack and the example is one click away.
+| `Qwen-Image-2.1-PE.json` | Qwen Image 2.1 text-to-image / edit: PE GGUF loader, prompt enhancer, up to 10 reference images, list encoder, text-encoder release | KayTool (Text node), ComfyUI-Custom-Scripts (ShowText) |
 | `MiniMax-H3-multi-reference.json` | H3 multi-reference video: audio refine, frozen cache, RTX upscaling | ComfyUI-H3-Multishot, ComfyUI-H3-AudioRefine, comfyui-minimax-h3-audio-T8, ComfyUI-KJNodes, ComfyUI-VideoHelperSuite, ComfyUI-DLSS5-Enhancer, Nvidia_RTX_Nodes_ComfyUI, ComfyUI-SolAttn_triton, ComfyUI-Easy-Use, KayTool |
 | `MiniMax-H3-two-pass-multi-reference.json` | H3 two-pass multi-reference: turbo sampling plus latent upscaling | ComfyUI-H3-Multishot, ComfyUI-MiniMax-H3-Turbo, Comfyui_Minimax_h3_latent_Upscaler, ComfyUI-KJNodes, ComfyUI-VideoHelperSuite, ComfyUI-SolAttn_triton, rgthree-comfy, ComfyUI-Easy-Use, KayTool |
+
+The matching `.jpg` is the example's thumbnail (`Qwen-Image-2.1-PE.jpg` is the screenshot above). The same
+files show up in ComfyUI's **`Workflows -> Browse Templates`** browser: by ComfyUI's convention an
+`example_workflows/` folder inside a custom node is read by the template browser. Install the pack and the
+example is one click away.
 
 For online mode, the endpoint must support OpenAI multimodal messages. API keys are used only at
 runtime and are never written to disk.
