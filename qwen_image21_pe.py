@@ -1573,11 +1573,13 @@ class QwenImage21PromptEnhancer:
 
         Nothing here touches the encoder cache or the answer cache, so turning
         the switch off costs nothing but the node's own overhead. Prompt Count
-        is ignored on purpose -- there is no per-prompt generation to repeat.
+        still applies: a count above 1 emits that many identical entries, which
+        is how the downstream list encoder turns one prompt into several runs.
         """
         prompt = (inputs.get("Prompt") or "").strip()
         if not prompt:
             raise ValueError("Prompt 不能为空。")
+        count = max(1, int(inputs.get("Prompt Count", 1) or 1))
         megapixels = float(inputs.get("Target Megapixels", 2.0) or 2.0)
         forced_ratio = inputs.get("Aspect Ratio", ASPECT_AUTO)
         forced_pair = None if forced_ratio == ASPECT_AUTO else _ratio_to_pair(forced_ratio)
@@ -1589,14 +1591,16 @@ class QwenImage21PromptEnhancer:
             # `resolution` when nothing is connected.
             width = height = 0
             shape_note = "画幅交给下游文本编码节点决定（跟着参考图或它的 resolution）。"
-        print(f"[Qwen Image 2.1 PE] 提示词增强已关闭：原样透传，PE 模型不会被加载。{shape_note}")
+        print(
+            f"[Qwen Image 2.1 PE] 提示词增强已关闭：原样透传 {count} 条，PE 模型不会被加载。{shape_note}"
+        )
         return (
-            [prompt],
-            [forced_ratio if forced_pair else ""],
-            [""],
-            [True],
-            [width],
-            [height],
+            [prompt] * count,
+            [forced_ratio if forced_pair else ""] * count,
+            [""] * count,
+            [True] * count,
+            [width] * count,
+            [height] * count,
         )
 
     def _enhance_one(self, variant, seed, is_last, **inputs):
