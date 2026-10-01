@@ -157,7 +157,8 @@ GPU 卸载层数默认为 `-1`，表示全部放入显存；显存不足时可�
 Qwen Image 2.1` 只吃单个字符串，把增强节点的 `Positive Prompt`（列表）接过去会直接崩在
 `'list' object has no attribute 'startswith'`。这个节点输入输出都是列表：`prompts` 接列表，
 `positive` / `negative` / `latent` 也按同样的条数输出，所以 `Prompt Count` 大于 1 时每条提示词
-都能各自走到采样器。参考图只缩放和 VAE 编码一次，所有提示词共用。
+都能各自走到采样器。它的 `Batch Size` 就是 latent 自己的批次维度（和「空Latent」的批次数目同义）：
+一次采样出几张，批内每张的噪声各不相同。参考图只缩放和 VAE 编码一次，所有提示词共用。
 
 另外还有一个通用小工具节点 **Release Text Encoder (VRAM)**：把它串在文本编码之后、采样器之前
 
@@ -242,6 +243,11 @@ Qwen Image 2.1` 只吃单个字符串，把增强节点的 `Positive Prompt`（�
   16GB 卡 + GGUF 实测：t2i 每条约 20-35 秒，edit 约 45-50 秒
 - 唯一省下的是模型载入：整批只载入一次、只释放一次（省十几秒，不是每条都省）
 - 配合缓存：同一批重复执行是毫秒级
+
+关掉 `Prompt Enhancement`（旁路）时 `Prompt Count` **不生效**：节点只输出你写的那一条提示词。
+复制 N 条相同的提示词没有意义——种子、提示词、尺寸完全一样，采样出来就是同一张图，白跑 N 遍。
+旁路想一次出多张，用文本编码节点的 **`Batch Size`**：那是 latent 自己的批次维度，一次采样里噪声张量
+的每个槽位各不相同，所以一批就是几张真正不同的图——和「空Latent」调批次数目是同一回事。
 
 官方 PE 编码器（放到 `models/text_encoders/`）：
 
@@ -369,7 +375,9 @@ There is also a **list-aware text encoder**, **Text Encode Qwen Image 2.1 (List)
 `Text Encode Qwen Image 2.1` takes one string, so wiring the enhancer's `Positive Prompt` (a list) into
 it dies with `'list' object has no attribute 'startswith'`. This one takes a list in and returns lists
 of `positive` / `negative` / `latent`, so a `Prompt Count` above 1 reaches the sampler one prompt at a
-time. Reference images are resized and VAE-encoded once and shared by every prompt.
+time. Its `Batch Size` is the latent's own batch dimension (the same meaning it has on the stock Empty
+Latent Image), so a single prompt can also come back as several different pictures from one run.
+Reference images are resized and VAE-encoded once and shared by every prompt.
 
 There is also a small general-purpose node, **Release Text Encoder (VRAM)**. Wire it between the text
 
@@ -464,6 +472,12 @@ nodes run once per prompt -- one KSampler wired to it renders N images.
   generation. Measured on a 16 GB card with GGUF: about 20-35 s per t2i prompt, 45-50 s per edit prompt
 - The only saving is the model load: one load and one release for the whole batch (tens of seconds, not per prompt)
 - With the cache on, re-running the same batch costs milliseconds
+
+With `Prompt Enhancement` switched off (bypass), `Prompt Count` does **not** apply: the node emits the one
+prompt you typed. N identical entries would be N runs of the same prompt under the same sampler seed --
+the same picture N times, for N times the sampling cost. To get several pictures out of one bypassed
+prompt, use the text encoder's **`Batch Size`**: it is the latent's own batch dimension, so a single
+sampling run holds one different noise slice per picture -- exactly what the stock Empty Latent Image does.
 
 Official PE encoders (put them in `models/text_encoders/`):
 

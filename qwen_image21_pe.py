@@ -1184,6 +1184,10 @@ class QwenImage21TextEncodeList:
     and returns lists of conditioning, so a Prompt Count above 1 actually reaches
     the sampler.
 
+    `batch_size` is the latent's own batch dimension -- the same meaning it has
+    on the stock Empty Latent Image -- so a single prompt can also come back as
+    several different pictures from one sampling run.
+
     Reference images are resized and VAE-encoded once and reused for every
     prompt, and the empty latent is built from the first reference's size, which
     is what the stock node does. Ten sockets are declared and the frontend keeps
@@ -1219,6 +1223,21 @@ class QwenImage21TextEncodeList:
                 "max": 8192,
                 "step": 16,
                 "tooltip": "画布高度。0=按参考图（没接图时按 resolution）。和 Width 一起接即可固定。",
+            },
+        )
+        # Appended last on purpose: ComfyUI matches widget values by position, so
+        # a new control has to go after the existing ones or every saved workflow
+        # would shift by one.
+        optional["batch_size"] = (
+            "INT",
+            {
+                "default": 1,
+                "min": 1,
+                "max": 4096,
+                "step": 1,
+                "tooltip": "每条提示词一次出几张，和「空Latent」的批次数目同义：一次采样，"
+                           "噪声张量的每个批次槽位各不相同，所以同一批里是几张不同的图。"
+                           "1 = 一条提示词一张图。",
             },
         )
         return {
@@ -1259,7 +1278,8 @@ class QwenImage21TextEncodeList:
         "负面条件。",
         "空 latent（16 通道 × 4 层，带 alpha 层）。要透明背景必须用这一路："
         "普通「空Latent」只有 4 通道、没有 alpha 层，提示词写得再对也只会得到纯白背景。"
-        "尺寸默认跟参考图；接上 Width/Height 就按它们出图。",
+        "尺寸默认跟参考图；接上 Width/Height 就按它们出图。"
+        "Batch Size 决定这一路一次带几张，一批里的噪声各不相同。",
     )
     OUTPUT_IS_LIST = (True, True, True)
     FUNCTION = "encode"
@@ -1274,6 +1294,7 @@ class QwenImage21TextEncodeList:
 
         clip = _scalar(clip)
         resolution = int(_scalar(resolution, 1024) or 1024)
+        batch = max(1, int(_scalar(optional.get("batch_size"), 1) or 1))
         prompt_list = _as_text_list(prompts)
         negative_list = _as_text_list(negative_prompt)
         images = [
@@ -1346,18 +1367,22 @@ class QwenImage21TextEncodeList:
 
         # One latent per prompt: they share a size but must not share a tensor,
         # or a sampler that edits its input would hand the change to the next one.
+        # The leading dimension is the latent's own batch, the same meaning it has
+        # on the stock Empty Latent Image: one sampling run builds a single noise
+        # tensor of [batch, ...], and every slot in it is a different slice.
         latents = [
             {
                 "samples": torch.zeros(
-                    [1, 64, latent_h // 16, latent_w // 16],
+                    [batch, 64, latent_h // 16, latent_w // 16],
                     device=comfy.model_management.intermediate_device(),
                 )
             }
             for _ in positives
         ]
+        batch_note = f"，每条 {batch} 张" if batch > 1 else ""
         print(
             f"[Prompt Enhancer] Text Encode (list)：{len(positives)} 条提示词"
-            f"，参考图 {len(images_vl)} 张"
+            f"{batch_note}，参考图 {len(images_vl)} 张"
             + ("（已并入 reference latents）" if ref_latents else "")
         )
         return (positives, negatives, latents)
@@ -1488,7 +1513,9 @@ class QwenImage21PromptEnhancer:
                         "min": 1,
                         "max": 8,
                         "step": 1,
-                        "tooltip": "输出几条提示词。每条都是一次完整生成，耗时按条数叠加。",
+                        "tooltip": "输出几条提示词。每条都是一次完整生成，耗时按条数叠加。"
+                                   "只在增强开启时生效：关闭（Bypass）时只有原提示词一条，"
+                                   "要一次出多张请用文本编码节点的 Batch Size。",
                     },
                 ),
                 "Output Language": (
@@ -1572,14 +1599,17 @@ class QwenImage21PromptEnhancer:
         """Pass the prompt straight through: no PE weights are loaded.
 
         Nothing here touches the encoder cache or the answer cache, so turning
-        the switch off costs nothing but the node's own overhead. Prompt Count
-        still applies: a count above 1 emits that many identical entries, which
-        is how the downstream list encoder turns one prompt into several runs.
+        the switch off costs nothing but the node's own overhead.
+
+        Prompt Count stays out of it. There is nothing to vary, so N entries
+        would mean N runs of the same prompt with the same sampler seed -- N
+        copies of one picture for N times the sampling cost. Several pictures
+        from one prompt is the text encoder's Batch Size instead: a single run
+        whose noise tensor holds one different slice per picture.
         """
         prompt = (inputs.get("Prompt") or "").strip()
         if not prompt:
             raise ValueError("Prompt 不能为空。")
-        count = max(1, int(inputs.get("Prompt Count", 1) or 1))
         megapixels = float(inputs.get("Target Megapixels", 2.0) or 2.0)
         forced_ratio = inputs.get("Aspect Ratio", ASPECT_AUTO)
         forced_pair = None if forced_ratio == ASPECT_AUTO else _ratio_to_pair(forced_ratio)
@@ -1592,15 +1622,18 @@ class QwenImage21PromptEnhancer:
             width = height = 0
             shape_note = "画幅交给下游文本编码节点决定（跟着参考图或它的 resolution）。"
         print(
-            f"[Qwen Image 2.1 PE] 提示词增强已关闭：原样透传 {count} 条，PE 模型不会被加载。{shape_note}"
+            f"[Qwen Image 2.1 PE] 提示词增强已关闭：原样透传 1 条，PE 模型不会被加载。{shape_note}"
+            "Prompt Count 在旁路下不生效，要一次出多张用文本编码节点的 Batch Size。"
         )
+        # Every output of this node is a list, so one entry in a list is how a
+        # scalar travels through it (a bare string would be split per character).
         return (
-            [prompt] * count,
-            [forced_ratio if forced_pair else ""] * count,
-            [""] * count,
-            [True] * count,
-            [width] * count,
-            [height] * count,
+            [prompt],
+            [forced_ratio if forced_pair else ""],
+            [""],
+            [True],
+            [width],
+            [height],
         )
 
     def _enhance_one(self, variant, seed, is_last, **inputs):
