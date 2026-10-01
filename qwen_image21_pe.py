@@ -1496,14 +1496,17 @@ class QwenImage21PromptEnhancer:
                         "max": 16.0,
                         "step": 0.1,
                         "tooltip": "Width/Height 按这个像素总量算。"
-                                   "t2i 用模型选的画幅；edit 用参考图的画幅、像素量还是按这里算。",
+                                   "t2i 用模型选的画幅；edit 用参考图的画幅、像素量还是按这里算。"
+                                   "旁路（关闭增强）时同样生效：没强制画幅就按参考图 1 的比例换算。",
                     },
                 ),
                 "Aspect Ratio": (
                     ASPECT_OPTIONS,
                     {
                         "default": ASPECT_AUTO,
-                        "tooltip": "默认模型自己定；选了就固定画幅，并按它算 Width/Height。",
+                        "tooltip": "默认模型自己定；选了就固定画幅，并按它算 Width/Height。"
+                                   "旁路（关闭增强）时没有模型可用，Auto 就按参考图 1 的比例算，"
+                                   "接不到参考图才交给下游文本编码节点的 resolution。",
                     },
                 ),
                 "Prompt Count": (
@@ -1606,25 +1609,46 @@ class QwenImage21PromptEnhancer:
         copies of one picture for N times the sampling cost. Several pictures
         from one prompt is the text encoder's Batch Size instead: a single run
         whose noise tensor holds one different slice per picture.
+
+        The canvas is still yours to set. A forced Aspect Ratio uses that ratio;
+        Auto with a reference image keeps the reference's framing, which is its
+        aspect ratio at Target Megapixels -- not its own pixel count, or the
+        budget would be ignored the way the edit path's ratio_follow used to
+        ignore it. Reading a shape costs nothing, so none of this loads a model.
+        Only Auto with nothing connected falls back to 0, which tells the text
+        encoder to use its own `resolution`.
         """
         prompt = (inputs.get("Prompt") or "").strip()
         if not prompt:
             raise ValueError("Prompt 不能为空。")
+        images = [
+            inputs[f"Image {index}"]
+            for index in range(1, MAX_INPUT_IMAGES + 1)
+            if inputs.get(f"Image {index}") is not None
+        ]
         megapixels = float(inputs.get("Target Megapixels", 2.0) or 2.0)
         forced_ratio = inputs.get("Aspect Ratio", ASPECT_AUTO)
         forced_pair = None if forced_ratio == ASPECT_AUTO else _ratio_to_pair(forced_ratio)
         if forced_pair:
             width, height = _canvas_from_pair(forced_pair, megapixels)
             shape_note = f"画幅按你的设定用 {forced_ratio}（{width}x{height}）。"
+        elif images:
+            source = images[0]
+            width, height = _canvas_from_pair(
+                (int(source.shape[-2]), int(source.shape[-3])), megapixels
+            )
+            shape_note = (
+                f"画幅沿用参考图 1 的比例，按 Target Megapixels {megapixels:g} 算出 {width}x{height}。"
+            )
         else:
-            # 0 tells the text encoder to follow the reference image, or its own
-            # `resolution` when nothing is connected.
+            # Nothing to follow: 0 hands the decision to the text encoder, which
+            # then uses its own `resolution`.
             width = height = 0
-            shape_note = "画幅交给下游文本编码节点决定（跟着参考图或它的 resolution）。"
+            shape_note = "没接参考图，画幅交给下游文本编码节点按它的 resolution 决定。"
         print(
             f"[Qwen Image 2.1 PE] 提示词增强已关闭：原样透传 1 条，PE 模型不会被加载。{shape_note}"
-            "Prompt Count 在旁路下不生效，要一次出多张用文本编码节点的 Batch Size。"
         )
+        print("[Qwen Image 2.1 PE] 旁路下 Prompt Count 不生效，要一次出多张用文本编码节点的 Batch Size。")
         # Every output of this node is a list, so one entry in a list is how a
         # scalar travels through it (a bare string would be split per character).
         return (

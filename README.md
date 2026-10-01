@@ -136,7 +136,7 @@ GPU 卸载层数默认为 `-1`，表示全部放入显存；显存不足时可�
 
 - 两个任务各有独立权重和独立系统提示词，节点已原样内置在 `pe_prompts/`，不会与权重脱节
 - 输出四路：`Positive Prompt`、`WH Ratio`、`Ratio Follow`、`Parse OK`
-- 另外输出 `Width` / `Height` 两个整数：都是「画幅 × `Target Megapixels`」——t2i 的画幅由模型选，edit 沿用参考图的画幅，像素量始终按你设的算
+- 另外输出 `Width` / `Height` 两个整数：都是「画幅 × `Target Megapixels`」——t2i 的画幅由模型选，edit 沿用参考图的画幅，像素量始终按你设的算；旁路（关闭增强）时没有模型可用，`Auto` 就按参考图 1 的比例算，接不到参考图才交给下游文本编码节点
 - `t2i` 只接受文字；`edit` 最多 10 张参考图（模型上限），按顺序用 `<image1>`… 引用，顺序不能乱
 - 图片端口是动态的：默认只显示 `Image 1`，连上以后才长出 `Image 2`，依次类推，最多 10 个
 - 思考默认开启，长度由加载节点上的 `Plan Tokens` 控制（默认 800，`-1` 为不限）；思考内容始终不会写进提示词
@@ -249,6 +249,10 @@ Qwen Image 2.1` 只吃单个字符串，把增强节点的 `Positive Prompt`（�
 旁路想一次出多张，用文本编码节点的 **`Batch Size`**：那是 latent 自己的批次维度，一次采样里噪声张量
 的每个槽位各不相同，所以一批就是几张真正不同的图——和「空Latent」调批次数目是同一回事。
 
+旁路的画幅同样受控，`Target Megapixels` 不会失效：强制了 `Aspect Ratio` 就按它算；
+留在 `Auto` 且接了参考图时，按**参考图 1 的比例** × `Target Megapixels` 算（i2i 沿用原图构图、
+像素量还是你定的那个）；只有一张参考图都没有时，才把画幅交给下游文本编码节点按它的 `resolution` 决定。
+
 官方 PE 编码器（放到 `models/text_encoders/`）：
 
 - `qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors` — t2i 扩写
@@ -353,7 +357,7 @@ Qwen3.5-VL 9B) and turns a short request into the long prompt 2.1 expects.
 
 - Each task has its own checkpoint and its own system prompt; both prompts ship verbatim in `pe_prompts/`
 - Six outputs: `Positive Prompt`, `WH Ratio`, `Ratio Follow`, `Parse OK`, `Width`, `Height`
-- `Width` / `Height` are pixels: ratio x `Target Megapixels` in both tasks -- the model picks the ratio for t2i, edit follows the reference image's ratio, and the pixel count is always the one you set
+- `Width` / `Height` are pixels: ratio x `Target Megapixels` in both tasks -- the model picks the ratio for t2i, edit follows the reference image's ratio, and the pixel count is always the one you set. Bypassed there is no model to ask, so `Auto` uses reference image 1's ratio instead, and only falls back to the downstream text encoder when no reference is connected
 - `t2i` takes text only; `edit` takes up to 10 reference images (the model's limit), referenced as `<image1>`... in connection order
 - Image sockets are dynamic: only `Image 1` shows at first, and connecting it reveals `Image 2`, up to ten
 - Thinking is on by default and its length is capped by the loader's `Plan Tokens` (800 by default, -1 for no cap);
@@ -478,6 +482,11 @@ prompt you typed. N identical entries would be N runs of the same prompt under t
 the same picture N times, for N times the sampling cost. To get several pictures out of one bypassed
 prompt, use the text encoder's **`Batch Size`**: it is the latent's own batch dimension, so a single
 sampling run holds one different noise slice per picture -- exactly what the stock Empty Latent Image does.
+
+The canvas is under the same rules when bypassed, and `Target Megapixels` keeps working: a forced
+`Aspect Ratio` is used as given, and `Auto` with a reference image follows **reference image 1's ratio**
+at your pixel budget (i2i keeps the source's framing without giving up the size control). Only with no
+reference image at all does the downstream text encoder decide, from its own `resolution`.
 
 Official PE encoders (put them in `models/text_encoders/`):
 
