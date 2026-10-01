@@ -1500,6 +1500,18 @@ class QwenImage21PromptEnhancer:
                                    "画进图里的文字规则不受影响。",
                     },
                 ),
+                # Appended last on purpose: ComfyUI matches widget values by
+                # position, so a new control has to go after the existing ones
+                # or every saved workflow would shift by one.
+                "Prompt Enhancement": (
+                    "BOOLEAN",
+                    {
+                        "default": True,
+                        "label_on": "On",
+                        "label_off": "Bypass",
+                        "tooltip": "关掉=提示词原样透传，不加载 PE 模型。",
+                    },
+                ),
             },
             "optional": {
                 "pe_model": (
@@ -1544,6 +1556,8 @@ class QwenImage21PromptEnhancer:
         return time.time_ns() if seed < 0 else seed
 
     def enhance(self, **inputs):
+        if not bool(inputs.get("Prompt Enhancement", True)):
+            return self._bypass(inputs)
         count = max(1, int(inputs.get("Prompt Count", 1) or 1))
         seed = int(inputs.get("Seed", 42))
         if seed < 0:
@@ -1553,6 +1567,37 @@ class QwenImage21PromptEnhancer:
             for index in range(count)
         ]
         return tuple([row[column] for row in rows] for column in range(6))
+
+    def _bypass(self, inputs):
+        """Pass the prompt straight through: no PE weights are loaded.
+
+        Nothing here touches the encoder cache or the answer cache, so turning
+        the switch off costs nothing but the node's own overhead. Prompt Count
+        is ignored on purpose -- there is no per-prompt generation to repeat.
+        """
+        prompt = (inputs.get("Prompt") or "").strip()
+        if not prompt:
+            raise ValueError("Prompt 不能为空。")
+        megapixels = float(inputs.get("Target Megapixels", 2.0) or 2.0)
+        forced_ratio = inputs.get("Aspect Ratio", ASPECT_AUTO)
+        forced_pair = None if forced_ratio == ASPECT_AUTO else _ratio_to_pair(forced_ratio)
+        if forced_pair:
+            width, height = _canvas_from_pair(forced_pair, megapixels)
+            shape_note = f"画幅按你的设定用 {forced_ratio}（{width}x{height}）。"
+        else:
+            # 0 tells the text encoder to follow the reference image, or its own
+            # `resolution` when nothing is connected.
+            width = height = 0
+            shape_note = "画幅交给下游文本编码节点决定（跟着参考图或它的 resolution）。"
+        print(f"[Qwen Image 2.1 PE] 提示词增强已关闭：原样透传，PE 模型不会被加载。{shape_note}")
+        return (
+            [prompt],
+            [forced_ratio if forced_pair else ""],
+            [""],
+            [True],
+            [width],
+            [height],
+        )
 
     def _enhance_one(self, variant, seed, is_last, **inputs):
         model = inputs.get("pe_model")
